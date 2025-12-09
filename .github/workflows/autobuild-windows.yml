@@ -1,0 +1,390 @@
+name: Nia — AutoBuilder (Windows)
+
+# Run on push to main and via manual dispatch (allows selecting runner)
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Runner label to use (e.g. windows-latest or your self-hosted runner label)'
+        required: true
+        default: 'windows-latest'
+      buildConfiguration:
+        description: 'Build configuration (Debug/Release)'
+        required: false
+        default: 'Release'
+      artifactPath:
+        description: 'Relative path that contains build artifacts (for upload)'
+        required: false
+        default: 'build/output'
+
+permissions:
+  contents: read
+  packages: write
+  actions: read
+
+jobs:
+  run-autobuild:
+    name: Run Invoke-AutoBuild.ps1 on ${{ github.event.inputs.runner || 'windows-latest' }}
+    # Uses the runner input from workflow_dispatch or windows-latest on push
+    runs-on: ${{ github.event.inputs.runner || 'windows-latest' }}
+
+    env:
+      # Put secret names here and set them in your repository's Secrets
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      NIA_ENV: production
+      BUILD_CONFIG: ${{ github.event.inputs.buildConfiguration || 'Release' }}
+      ARTIFACT_PATH: ${{ github.event.inputs.artifactPath || 'build/output' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Show runner info
+        run: |
+          Write-Host "Running on: $($env:RUNNER_OS) / $([System.Environment]::MachineName)"
+          Write-Host "Requested runs-on label: ${{ github.event.inputs.runner }}"
+        shell: pwsh
+
+      - name: Ensure script is present
+        run: |
+          if (-not (Test-Path -Path "./scripts/Invoke-AutoBuild.ps1")) {
+            Write-Error "Missing file: ./scripts/Invoke-AutoBuild.ps1"
+            exit 2
+          }
+          Write-Host "Found Invoke-AutoBuild.ps1"
+        shell: pwsh
+
+      - name: Set PowerShell execution policy (temporary)
+        run: |
+          Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+          Write-Host "Execution policy set to Bypass for process"
+        shell: pwsh
+
+      - name: Install optional prerequisites (example)
+        if: ${{ runner.os == 'Windows' }}
+        run: |
+          # Example: install PS modules needed by your script - adjust to your needs
+          # Install-Module -Name PSModuleExample -Force -Scope CurrentUser
+          Write-Host "Skipping optional module installs by default. Modify this step as needed."
+        shell: pwsh
+
+      - name: Run Invoke-AutoBuild.ps1
+        id: autobuild
+        shell: pwsh
+        run: |
+          $scriptPath = Join-Path $PWD "scripts\Invoke-AutoBuild.ps1"
+          Write-Host "Executing: $scriptPath"
+          # Pass build configuration and artifact path as parameters (modify script to accept them)
+          & $scriptPath -Configuration $env:BUILD_CONFIG -OutputPath $env:ARTIFACT_PATH
+          $exit = $LASTEXITCODE
+          Write-Host "Invoke-AutoBuild.ps1 completed with exit code: $exit"
+          if ($exit -ne 0) {
+            throw "AutoBuild script failed with exit code $exit"
+          }
+
+      - name: List artifact folder (for debugging)
+        if: always()
+        shell: pwsh
+        run: |
+          $p = Join-Path $PWD $env:ARTIFACT_PATH
+          Write-Host "Artifact path: $p"
+          if (Test-Path $p) {
+            Get-ChildItem -Recurse -Force $p | Select-Object FullName, Length
+          } else {
+            Write-Host "No artifacts found at $p"
+          }
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nia-build-artifacts
+          path: ${{ env.ARTIFACT_PATH }}
+          retention-days: 7
+
+      - name: Publish build logs (optional)
+        if: always()
+        shell: pwsh
+        run: |
+          # If your script writes a log file, upload it as artifact or print to console here.
+          $logFile = "scripts\autobuild.log"
+          if (Test-Path $logFile) {
+            Write-Host "---- BEGIN autobuild.log ----"
+            Get-Content $logFile -Tail 100
+            Write-Host "---- END autobuild.log ----"
+          } else {
+            Write-Host "No autobuild.log present."
+          }
+Nia-Autobuilder
+    └── NiaCryptoCompute/
+          ├── miner_manager.py
+          ├── quantum_optimizer.py
+          ├── profitability.py
+          ├── wallet_vault.py
+          ├── config.json
+          └── run.ps1
+
+NiaBrain/
+    └── agents/
+          └── nia_crypto_agent.py   # LLM control layer
+while True:
+    instruction = check_for_new_tasks()
+    plan = llm_generate_plan(instruction)
+    actions = plan_to_actions(plan)
+    execute_actions(actions)
+    save_memory(instruction, plan, actions)
+Export-ModuleMember 
+    -Function
+    Get-NiaStatus,
+    Send-NiaCommand,
+    Speak-ToNia
+Rebuild Nia module
+⤴  Push
+WindowsPowerShell/Modules/Nia/
+name: Nia AutoBuild (Windows Runner)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target task (build/test/deploy)'
+        required: true
+        default: 'build'
+      runner:
+        description: 'Runner to use (windows-latest or self-hosted)'
+        required: true
+        default: 'windows-latest'
+
+jobs:
+  autobuild:
+    runs-on: ${{ github.event.inputs.runner }}
+    if: ${{ github.event.inputs.runner == 'windows-latest' || startsWith(github.event.inputs.runner, 'self-hosted') }}
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup PowerShell (for ubuntu self-hosted runners that may need pwsh)
+        if: runner.os != 'Windows'
+        uses: actions/setup-powershell@v2
+
+      - name: Ensure execution policy & prerequisites
+        shell: pwsh
+        run: |
+          Write-Host "Setting ExecutionPolicy to RemoteSigned for current user..."
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned -Force
+          # Optional: install modules used by the script
+          if (-not (Get-Module -ListAvailable -Name PSDesiredStateConfiguration)) {
+            Install-Module -Name PSDesiredStateConfiguration -Force -Scope CurrentUser -AllowClobber
+          }
+
+      - name: Run Invoke-AutoBuild.ps1
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NIA_ENV: production
+        run: |
+          $scriptPath = ".\scripts\Invoke-AutoBuild.ps1"
+          if (-not (Test-Path $scriptPath)) {
+            Write-Error "Invoke-AutoBuild.ps1 not found at $scriptPath"
+            exit 2
+          }
+          & $scriptPath -Target "${{ github.event.inputs.target }}" -GitHubToken "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nia-autobuild-artifacts
+          path: |
+            .\build\**
+            .\artifacts\**
+name: Mining Manager CI
+
+on:
+  push:
+    paths:
+      - 'services/mining-manager/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: services/mining-manager
+          file: services/mining-manager/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/mining-manager:latest
+      - name: Package Helm chart
+        run: |
+          helm package services/mining-manager/helm/mining-manager -d helm-packages
+          helm repo index helm-packages --url https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/helm-packages/
+      - name: Commit Helm packages
+        uses: EndBug/add-and-commit@v9
+        with:
+          author_name: 'gha-bot'
+          author_email: 'gha-bot@localhost'
+          message: 'chore: package mining-manager helm chart'
+          add: 'helm-packages/*'
+# quantum_optimizer.py (safe demo)
+from qiskit import QuantumCircuit, Aer, execute
+import numpy as np
+
+def suggest_allocation(nodes):
+    # Simple randomized suggestion using simulator-based randomness
+    backend = Aer.get_backend('aer_simulator')
+    qc = QuantumCircuit(1,1)
+    qc.h(0)
+    qc.measure(0,0)
+    job = execute(qc, backend, shots=1)
+    r = job.result().get_counts()
+    bit = list(r.keys())[0]
+    idx = int(bit, 2) % len(nodes)
+    # rotate list to prefer a node
+    nodes = nodes[idx:] + nodes[:idx]
+    return nodes  # prioritized list
+
+if __name__ == '__main__':
+    nodes = ['node-a','node-b','node-c']
+    print(suggest_allocation(nodes))
+name: Nia — AutoBuilder (Windows)
+
+# Run on push to main and via manual dispatch (allows selecting runner)
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Runner label to use (e.g. windows-latest or your self-hosted runner label)'
+        required: true
+        default: 'windows-latest'
+      buildConfiguration:
+        description: 'Build configuration (Debug/Release)'
+        required: false
+        default: 'Release'
+      artifactPath:
+        description: 'Relative path that contains build artifacts (for upload)'
+        required: false
+        default: 'build/output'
+
+permissions:
+  contents: read
+  packages: write
+  actions: read
+
+jobs:
+  run-autobuild:
+    name: Run Invoke-AutoBuild.ps1 on ${{ github.event.inputs.runner || 'windows-latest' }}
+    # Uses the runner input from workflow_dispatch or windows-latest on push
+    runs-on: ${{ github.event.inputs.runner || 'windows-latest' }}
+
+    env:
+      # Put secret names here and set them in your repository's Secrets
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      NIA_ENV: production
+      BUILD_CONFIG: ${{ github.event.inputs.buildConfiguration || 'Release' }}
+      ARTIFACT_PATH: ${{ github.event.inputs.artifactPath || 'build/output' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Show runner info
+        run: |
+          Write-Host "Running on: $($env:RUNNER_OS) / $([System.Environment]::MachineName)"
+          Write-Host "Requested runs-on label: ${{ github.event.inputs.runner }}"
+        shell: pwsh
+
+      - name: Ensure script is present
+        run: |
+          if (-not (Test-Path -Path "./scripts/Invoke-AutoBuild.ps1")) {
+            Write-Error "Missing file: ./scripts/Invoke-AutoBuild.ps1"
+            exit 2
+          }
+          Write-Host "Found Invoke-AutoBuild.ps1"
+        shell: pwsh
+
+      - name: Set PowerShell execution policy (temporary)
+        run: |
+          Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+          Write-Host "Execution policy set to Bypass for process"
+        shell: pwsh
+
+      - name: Install optional prerequisites (example)
+        if: ${{ runner.os == 'Windows' }}
+        run: |
+          # Example: install PS modules needed by your script - adjust to your needs
+          # Install-Module -Name PSModuleExample -Force -Scope CurrentUser
+          Write-Host "Skipping optional module installs by default. Modify this step as needed."
+        shell: pwsh
+
+      - name: Run Invoke-AutoBuild.ps1
+        id: autobuild
+        shell: pwsh
+        run: |
+          $scriptPath = Join-Path $PWD "scripts\Invoke-AutoBuild.ps1"
+          Write-Host "Executing: $scriptPath"
+          # Pass build configuration and artifact path as parameters (modify script to accept them)
+          & $scriptPath -Configuration $env:BUILD_CONFIG -OutputPath $env:ARTIFACT_PATH
+          $exit = $LASTEXITCODE
+          Write-Host "Invoke-AutoBuild.ps1 completed with exit code: $exit"
+          if ($exit -ne 0) {
+            throw "AutoBuild script failed with exit code $exit"
+          }
+
+      - name: List artifact folder (for debugging)
+        if: always()
+        shell: pwsh
+        run: |
+          $p = Join-Path $PWD $env:ARTIFACT_PATH
+          Write-Host "Artifact path: $p"
+          if (Test-Path $p) {
+            Get-ChildItem -Recurse -Force $p | Select-Object FullName, Length
+          } else {
+            Write-Host "No artifacts found at $p"
+          }
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nia-build-artifacts
+          path: ${{ env.ARTIFACT_PATH }}
+          retention-days: 7
+
+      - name: Publish build logs (optional)
+        if: always()
+        shell: pwsh
+        run: |
+          # If your script writes a log file, upload it as artifact or print to console here.
+          $logFile = "scripts\autobuild.log"
+          if (Test-Path $logFile) {
+            Write-Host "---- BEGIN autobuild.log ----"
+            Get-Content $logFile -Tail 100
+            Write-Host "---- END autobuild.log ----"
+          } else {
+            Write-Host "No autobuild.log present."
+          }
+
+
+
